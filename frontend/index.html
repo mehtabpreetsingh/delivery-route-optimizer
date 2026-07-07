@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Delivery Route Optimizer</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+<style>
+  :root {
+    --bg: #0d1117;
+    --panel: #131a24;
+    --border: #24303f;
+    --text: #e6edf3;
+    --muted: #8b98a5;
+    --accent: #ff9f1c;      /* delivery-truck amber */
+    --accent-dim: #7a5216;
+    --depot: #3ddc97;       /* warehouse green */
+    --naive: #4b5b6b;       /* muted route for "before" */
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+  }
+  header {
+    padding: 18px 24px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+  }
+  header h1 {
+    font-size: 18px;
+    margin: 0;
+    letter-spacing: 0.3px;
+  }
+  header span.tag {
+    font-size: 12px;
+    color: var(--muted);
+    background: var(--panel);
+    border: 1px solid var(--border);
+    padding: 3px 8px;
+    border-radius: 20px;
+  }
+  .layout {
+    display: grid;
+    grid-template-columns: 340px 1fr;
+    height: calc(100vh - 58px);
+  }
+  .sidebar {
+    background: var(--panel);
+    border-right: 1px solid var(--border);
+    padding: 18px;
+    overflow-y: auto;
+  }
+  .sidebar h2 {
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: var(--muted);
+    margin: 0 0 10px;
+  }
+  .instructions {
+    font-size: 13px;
+    color: var(--muted);
+    line-height: 1.5;
+    background: #0d1117;
+    border: 1px solid var(--border);
+    padding: 10px 12px;
+    border-radius: 8px;
+    margin-bottom: 16px;
+  }
+  #stopList {
+    list-style: none;
+    padding: 0;
+    margin: 0 0 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  #stopList li {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    background: #0d1117;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 8px;
+  }
+  #stopList li .dot {
+    width: 9px; height: 9px; border-radius: 50%;
+    flex-shrink: 0;
+  }
+  #stopList li button {
+    margin-left: auto;
+    background: none;
+    border: none;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 13px;
+  }
+  #stopList li button:hover { color: #ff6b6b; }
+
+  button.primary {
+    width: 100%;
+    background: var(--accent);
+    color: #1a1006;
+    font-weight: 600;
+    border: none;
+    padding: 10px 12px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 14px;
+    margin-bottom: 8px;
+  }
+  button.primary:disabled {
+    background: var(--accent-dim);
+    color: #6b5a3c;
+    cursor: not-allowed;
+  }
+  button.secondary {
+    width: 100%;
+    background: transparent;
+    color: var(--muted);
+    border: 1px solid var(--border);
+    padding: 8px 12px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 13px;
+  }
+  .results {
+    margin-top: 18px;
+    border-top: 1px solid var(--border);
+    padding-top: 14px;
+  }
+  .stat {
+    display: flex;
+    justify-content: space-between;
+    font-size: 13px;
+    padding: 5px 0;
+    color: var(--muted);
+  }
+  .stat b { color: var(--text); }
+  .stat.highlight b { color: var(--accent); }
+  #map { width: 100%; height: 100%; }
+  .legend {
+    position: absolute;
+    bottom: 16px;
+    right: 16px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 12px;
+    color: var(--muted);
+    z-index: 500;
+  }
+  .legend div { display: flex; align-items: center; gap: 6px; margin: 3px 0; }
+  .legend .line { width: 18px; height: 3px; border-radius: 2px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Delivery Route Optimizer</h1>
+  <span class="tag">Nearest Neighbor + 2-opt</span>
+</header>
+
+<div class="layout">
+  <div class="sidebar">
+    <h2>Setup</h2>
+    <div class="instructions">
+      Click the map to drop stops. The <b>first</b> click is the warehouse/depot,
+      every click after that is a delivery address. Add at least 3 stops, then optimize.
+    </div>
+
+    <ul id="stopList"></ul>
+
+    <button class="primary" id="optimizeBtn" disabled>Optimize Route</button>
+    <button class="secondary" id="clearBtn">Clear all stops</button>
+    <button class="secondary" id="demoBtn">Load demo stops</button>
+
+    <div class="results" id="results" style="display:none;">
+      <h2>Results</h2>
+      <div class="stat"><span>Unoptimized distance</span><b id="naiveDist">–</b></div>
+      <div class="stat"><span>Optimized distance</span><b id="optDist">–</b></div>
+      <div class="stat highlight"><span>Distance saved</span><b id="savedDist">–</b></div>
+    </div>
+  </div>
+
+  <div style="position:relative;">
+    <div id="map"></div>
+    <div class="legend">
+      <div><span class="line" style="background:var(--naive)"></span> Unoptimized (visit-in-order)</div>
+      <div><span class="line" style="background:var(--accent)"></span> Optimized route</div>
+      <div><span class="dot" style="display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--depot)"></span> Warehouse / depot</div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+const map = L.map('map', { zoomControl: true }).setView([30.901, 75.857], 13); // Ludhiana default view
+
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '&copy; OpenStreetMap contributors',
+  maxZoom: 19
+}).addTo(map);
+
+let points = [];       // {lat, lng, label}
+let markers = [];
+let naiveLine = null;
+let optLine = null;
+
+function render() {
+  const list = document.getElementById('stopList');
+  list.innerHTML = '';
+  points.forEach((p, i) => {
+    const li = document.createElement('li');
+    const color = i === 0 ? 'var(--depot)' : 'var(--accent)';
+    li.innerHTML = `<span class="dot" style="background:${color}"></span>
+                     <span>${p.label}</span>
+                     <button data-i="${i}">✕</button>`;
+    list.appendChild(li);
+  });
+  list.querySelectorAll('button').forEach(btn => {
+    btn.onclick = () => {
+      const i = parseInt(btn.dataset.i);
+      map.removeLayer(markers[i]);
+      markers.splice(i, 1);
+      points.splice(i, 1);
+      render();
+    };
+  });
+  document.getElementById('optimizeBtn').disabled = points.length < 3;
+}
+
+function addPoint(lat, lng) {
+  const label = points.length === 0 ? 'Warehouse (depot)' : `Stop ${points.length}`;
+  points.push({ lat, lng, label });
+  const marker = L.circleMarker([lat, lng], {
+    radius: 8,
+    color: points.length === 1 ? '#3ddc97' : '#ff9f1c',
+    fillColor: points.length === 1 ? '#3ddc97' : '#ff9f1c',
+    fillOpacity: 0.9,
+    weight: 2
+  }).addTo(map).bindTooltip(label, { permanent: false });
+  markers.push(marker);
+  render();
+}
+
+map.on('click', (e) => addPoint(e.latlng.lat, e.latlng.lng));
+
+document.getElementById('clearBtn').onclick = () => {
+  markers.forEach(m => map.removeLayer(m));
+  points = []; markers = [];
+  if (naiveLine) { map.removeLayer(naiveLine); naiveLine = null; }
+  if (optLine) { map.removeLayer(optLine); optLine = null; }
+  document.getElementById('results').style.display = 'none';
+  render();
+};
+
+document.getElementById('demoBtn').onclick = () => {
+  document.getElementById('clearBtn').onclick();
+  const demo = [
+    [30.9010, 75.8573], [30.9100, 75.8200], [30.8800, 75.8700],
+    [30.9250, 75.8400], [30.8950, 75.7900], [30.9150, 75.9000]
+  ];
+  demo.forEach(([lat, lng]) => addPoint(lat, lng));
+};
+
+document.getElementById('optimizeBtn').onclick = async () => {
+  const btn = document.getElementById('optimizeBtn');
+  btn.disabled = true;
+  btn.textContent = 'Optimizing...';
+  try {
+    const res = await fetch('/api/optimize', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ points })
+    });
+    const data = await res.json();
+    if (data.error) { alert(data.error); return; }
+    drawRoute(data.naive.order, 'naive');
+    drawRoute(data.optimized.order, 'opt');
+
+    document.getElementById('results').style.display = 'block';
+    document.getElementById('naiveDist').textContent = data.naive.distance_km + ' km';
+    document.getElementById('optDist').textContent = data.optimized.distance_km + ' km';
+    document.getElementById('savedDist').textContent =
+      data.distance_saved_km + ' km (' + data.distance_saved_pct + '%)';
+  } catch (err) {
+    alert('Could not reach the optimizer API. Is the Flask server running?');
+    console.error(err);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Optimize Route';
+  }
+};
+
+function drawRoute(order, kind) {
+  const latlngs = order.map(i => [points[i].lat, points[i].lng]);
+  if (kind === 'naive') {
+    if (naiveLine) map.removeLayer(naiveLine);
+    naiveLine = L.polyline(latlngs, { color: '#4b5b6b', weight: 3, dashArray: '6 6' }).addTo(map);
+  } else {
+    if (optLine) map.removeLayer(optLine);
+    optLine = L.polyline(latlngs, { color: '#ff9f1c', weight: 4 }).addTo(map);
+  }
+}
+</script>
+</body>
+</html>
