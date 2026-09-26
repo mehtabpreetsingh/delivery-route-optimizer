@@ -9,15 +9,6 @@ an optimized visiting order using two classic routing algorithms and
 visualizes the "before vs. after" route on an interactive map — showing the
 distance and percentage saved.
 
-## Live demo (screenshots)
-
-Add your own screenshots to `screenshots/` once you run it locally, e.g.
-`screenshots/demo.png`, and reference them here:
-
-```markdown
-![App screenshot](screenshots/demo.png)
-```
-
 ## How it works
 
 1. **Distance matrix** — pairwise distances between all stops are computed
@@ -100,7 +91,7 @@ Response:
 ```
 
 ## Possible extensions
-
+STILL WORKING ON IT...
 - Multi-vehicle routing (split stops across several delivery agents)
 - Time-window constraints (delivery slots)
 - Real road-network distances via OSRM instead of straight-line haversine
